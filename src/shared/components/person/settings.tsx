@@ -7,7 +7,6 @@ import {
   myAuth,
   personToChoice,
   setIsoData,
-  setTheme,
   showLocal,
   updateCommunityBlock,
   updateInstanceBlock,
@@ -45,7 +44,11 @@ import {
   RequestState,
   wrapClient,
 } from "../../services/HttpService";
-import { I18NextService, languages } from "../../services/I18NextService";
+import {
+  I18NextService,
+  languages,
+  loadUserLanguage,
+} from "../../services/I18NextService";
 import { setupTippy } from "../../tippy";
 import { toast } from "../../toast";
 import { HtmlTags } from "../common/html-tags";
@@ -63,7 +66,7 @@ import { PersonListing } from "./person-listing";
 import { InitialFetchRequest } from "../../interfaces";
 import TotpModal from "../common/totp-modal";
 import { LoadingEllipses } from "../common/loading-ellipses";
-import { updateDataBsTheme } from "../../utils/browser";
+import { refreshTheme, setThemeOverride } from "../../utils/browser";
 import { getHttpBaseInternal } from "../../utils/env";
 
 type SettingsData = RouteDataResponse<{
@@ -333,6 +336,12 @@ export class Settings extends Component<any, SettingsState> {
         instancesRes: await HttpService.client.getFederatedInstances(),
       });
     }
+  }
+
+  componentWillUnmount(): void {
+    // In case `interface_language` change wasn't saved.
+    loadUserLanguage();
+    setThemeOverride(undefined);
   }
 
   static async fetchInitialData({
@@ -791,7 +800,7 @@ export class Settings extends Component<any, SettingsState> {
                 onChange={linkEvent(this, this.handleInterfaceLangChange)}
                 className="form-select d-inline-block w-auto"
               >
-                <option disabled aria-hidden="true">
+                <option disabled aria-hidden="true" selected>
                   {I18NextService.i18n.t("interface_language")}
                 </option>
                 <option value="browser">
@@ -1444,13 +1453,19 @@ export class Settings extends Component<any, SettingsState> {
 
   handleThemeChange(i: Settings, event: any) {
     i.setState(s => ((s.saveUserSettingsForm.theme = event.target.value), s));
-    setTheme(event.target.value, true);
+    setThemeOverride(event.target.value);
   }
 
   handleInterfaceLangChange(i: Settings, event: any) {
     const newLang = event.target.value ?? "browser";
     I18NextService.i18n.changeLanguage(
       newLang === "browser" ? navigator.languages : newLang,
+      () => {
+        // Now the language is loaded, can be synchronous. Let the state update first.
+        window.requestAnimationFrame(() => {
+          i.forceUpdate();
+        });
+      },
     );
 
     i.setState(
@@ -1549,12 +1564,14 @@ export class Settings extends Component<any, SettingsState> {
         });
 
         UserService.Instance.myUserInfo = siteRes.data.my_user;
+        loadUserLanguage();
       }
 
       toast(I18NextService.i18n.t("saved"));
       window.scrollTo(0, 0);
     }
 
+    setThemeOverride(undefined);
     i.setState({ saveRes });
   }
 
@@ -1649,7 +1666,7 @@ export class Settings extends Component<any, SettingsState> {
         } = siteRes.data.my_user!.local_user_view;
 
         UserService.Instance.myUserInfo = siteRes.data.my_user;
-        updateDataBsTheme(siteRes.data);
+        refreshTheme();
 
         i.setState(prev => ({
           ...prev,
