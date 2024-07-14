@@ -14,6 +14,7 @@ import "./styles.scss";
 import { Theme } from "./theme";
 import AnonymousGuard from "../common/anonymous-guard";
 import AdultConsentModal from "../common/adult-consent-modal";
+import { destroyTippy, setupTippy } from "../../tippy";
 
 function handleJumpToContent(event) {
   event.preventDefault();
@@ -22,6 +23,72 @@ function handleJumpToContent(event) {
 export default class App extends Component<any, any> {
   private isoData: IsoDataOptionalSite = setIsoData(this.context);
   private readonly rootRef = createRef<HTMLDivElement>();
+
+  componentDidMount() {
+    setupTippy(this.rootRef);
+  }
+
+  componentWillUnmount() {
+    destroyTippy();
+  }
+
+  routes = routes.map(
+    ({
+      path,
+      component: RouteComponent,
+      fetchInitialData,
+      getQueryParams,
+      mountedSameRouteNavKey,
+    }) => (
+      <Route
+        key={path}
+        path={path}
+        exact
+        component={routeProps => {
+          if (!fetchInitialData) {
+            FirstLoadService.falsify();
+          }
+
+          let queryProps = routeProps;
+          if (getQueryParams && this.isoData.site_res) {
+            // ErrorGuard will not render its children when
+            // site_res is missing, this guarantees that props
+            // will always contain the query params.
+            queryProps = {
+              ...routeProps,
+              ...getQueryParams(
+                routeProps.location.search,
+                this.isoData.site_res,
+              ),
+            };
+          }
+
+          // When key is location.key the component will be recreated when
+          // navigating to itself. This is usesful to e.g. reset forms.
+          const key = mountedSameRouteNavKey ?? routeProps.location.key;
+
+          return (
+            <ErrorGuard>
+              <div tabIndex={-1}>
+                {RouteComponent &&
+                  (isAuthPath(path ?? "") ? (
+                    <AuthGuard {...routeProps}>
+                      <RouteComponent key={key} {...queryProps} />
+                    </AuthGuard>
+                  ) : isAnonymousPath(path ?? "") ? (
+                    <AnonymousGuard>
+                      <RouteComponent key={key} {...queryProps} />
+                    </AnonymousGuard>
+                  ) : (
+                    <RouteComponent key={key} {...queryProps} />
+                  ))}
+              </div>
+            </ErrorGuard>
+          );
+        }}
+      />
+    ),
+  );
 
   render() {
     const siteRes = this.isoData.site_res;
@@ -55,58 +122,7 @@ export default class App extends Component<any, any> {
             <Navbar siteRes={siteRes} />
             <div className="mt-4 p-0 fl-1">
               <Switch>
-                {routes.map(
-                  ({
-                    path,
-                    component: RouteComponent,
-                    fetchInitialData,
-                    getQueryParams,
-                  }) => (
-                    <Route
-                      key={path}
-                      path={path}
-                      exact
-                      component={routeProps => {
-                        if (!fetchInitialData) {
-                          FirstLoadService.falsify();
-                        }
-
-                        let queryProps = routeProps;
-                        if (getQueryParams && this.isoData.site_res) {
-                          // ErrorGuard will not render its children when
-                          // site_res is missing, this guarantees that props
-                          // will always contain the query params.
-                          queryProps = {
-                            ...routeProps,
-                            ...getQueryParams(
-                              routeProps.location.search,
-                              this.isoData.site_res,
-                            ),
-                          };
-                        }
-
-                        return (
-                          <ErrorGuard>
-                            <div tabIndex={-1}>
-                              {RouteComponent &&
-                                (isAuthPath(path ?? "") ? (
-                                  <AuthGuard {...routeProps}>
-                                    <RouteComponent {...queryProps} />
-                                  </AuthGuard>
-                                ) : isAnonymousPath(path ?? "") ? (
-                                  <AnonymousGuard>
-                                    <RouteComponent {...queryProps} />
-                                  </AnonymousGuard>
-                                ) : (
-                                  <RouteComponent {...queryProps} />
-                                ))}
-                            </div>
-                          </ErrorGuard>
-                        );
-                      }}
-                    />
-                  ),
-                )}
+                {this.routes}
                 <Route component={ErrorPage} />
               </Switch>
             </div>

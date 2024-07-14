@@ -51,6 +51,7 @@ import { BanUpdateForm } from "../common/mod-action-form-modal";
 import PostActionDropdown from "../common/content-actions/post-action-dropdown";
 import { CrossPostParams } from "@utils/types";
 import { RequestState } from "../../services/HttpService";
+import { toast } from "../../toast";
 
 type PostListingState = {
   showEdit: boolean;
@@ -58,6 +59,7 @@ type PostListingState = {
   viewSource: boolean;
   showAdvanced: boolean;
   showBody: boolean;
+  loading: boolean;
 };
 
 interface PostListingProps {
@@ -103,10 +105,11 @@ export class PostListing extends Component<PostListingProps, PostListingState> {
   private readonly isoData: IsoDataOptionalSite = setIsoData(this.context);
   state: PostListingState = {
     showEdit: false,
-    imageExpanded: !!this.isoData.site_res?.site_view.site.content_warning,
+    imageExpanded: false,
     viewSource: false,
     showAdvanced: false,
     showBody: false,
+    loading: false,
   };
 
   constructor(props: any, context: any) {
@@ -134,14 +137,30 @@ export class PostListing extends Component<PostListingProps, PostListingState> {
     this.handleHidePost = this.handleHidePost.bind(this);
   }
 
-  componentDidMount(): void {
-    if (UserService.Instance.myUserInfo) {
+  unlisten = () => {};
+
+  componentWillMount(): void {
+    if (
+      UserService.Instance.myUserInfo &&
+      !this.isoData.showAdultConsentModal
+    ) {
       const { auto_expand, blur_nsfw } =
         UserService.Instance.myUserInfo.local_user_view.local_user;
       this.setState({
         imageExpanded: auto_expand && !(blur_nsfw && this.postView.post.nsfw),
       });
     }
+
+    // Leave edit mode on navigation
+    this.unlisten = this.context.router.history.listen(() => {
+      if (this.state.showEdit) {
+        this.setState({ showEdit: false });
+      }
+    });
+  }
+
+  componentWillUnmount(): void {
+    this.unlisten();
   }
 
   get postView(): PostView {
@@ -173,6 +192,7 @@ export class PostListing extends Component<PostListingProps, PostListingState> {
             voteDisplayMode={this.props.voteDisplayMode}
             allLanguages={this.props.allLanguages}
             siteLanguages={this.props.siteLanguages}
+            loading={this.state.loading}
           />
         )}
       </div>
@@ -201,6 +221,27 @@ export class PostListing extends Component<PostListingProps, PostListingState> {
     const { post } = this.postView;
     const { url } = post;
 
+    if (this.isoData.showAdultConsentModal) {
+      return <></>;
+    }
+
+    // if direct video link or embedded video link
+    if (url && (isVideo(url) || post.embed_video_url)) {
+      return (
+        <div className="embed-responsive ratio ratio-16x9 mt-3">
+          <video
+            onLoadStart={linkEvent(this, this.handleVideoLoadStart)}
+            onPlay={linkEvent(this, this.handleVideoLoadStart)}
+            onVolumeChange={linkEvent(this, this.handleVideoVolumeChange)}
+            controls
+            className="embed-responsive-item col-12"
+          >
+            <source src={post.embed_video_url ?? url} type="video/mp4" />
+          </video>
+        </div>
+      );
+    }
+
     if (this.imageSrc) {
       return (
         <>
@@ -219,37 +260,6 @@ export class PostListing extends Component<PostListingProps, PostListingState> {
             </button>
           </div>
         </>
-      );
-    }
-
-    // if direct video link
-    if (url && isVideo(url)) {
-      return (
-        <div className="embed-responsive ratio ratio-16x9 mt-3">
-          <video
-            onLoadStart={linkEvent(this, this.handleVideoLoadStart)}
-            onPlay={linkEvent(this, this.handleVideoLoadStart)}
-            onVolumeChange={linkEvent(this, this.handleVideoVolumeChange)}
-            controls
-            className="embed-responsive-item col-12"
-          >
-            <source src={url} type="video/mp4" />
-          </video>
-        </div>
-      );
-    }
-
-    // if embedded video link
-    if (url && post.embed_video_url) {
-      return (
-        <div className="ratio ratio-16x9">
-          <iframe
-            allowFullScreen
-            className="post-metadata-iframe"
-            src={post.embed_video_url}
-            title={post.embed_title}
-          ></iframe>
-        </div>
       );
     }
 
@@ -303,7 +313,13 @@ export class PostListing extends Component<PostListingProps, PostListingState> {
           />
         </button>
       );
-    } else if (!this.props.hideImage && url && thumbnail && this.imageSrc) {
+    } else if (
+      !this.props.hideImage &&
+      url &&
+      thumbnail &&
+      this.imageSrc &&
+      !isVideo(url)
+    ) {
       return (
         <a
           className="thumbnail rounded overflow-hidden d-inline-block position-relative p-0 border-0"
@@ -323,7 +339,12 @@ export class PostListing extends Component<PostListingProps, PostListingState> {
       if ((!this.props.hideImage && isVideo(url)) || post.embed_video_url) {
         return (
           <a
-            className="text-body"
+            className={classNames(
+              "thumbnail rounded",
+              thumbnail
+                ? "overflow-hidden d-inline-block position-relative p-0 border-0"
+                : "text-body bg-light d-flex justify-content-center",
+            )}
             href={url}
             title={url}
             rel={relTags}
@@ -332,9 +353,15 @@ export class PostListing extends Component<PostListingProps, PostListingState> {
             aria-label={I18NextService.i18n.t("expand_here")}
             target={this.linkTarget}
           >
-            <div className="thumbnail rounded bg-light d-flex justify-content-center">
-              <Icon icon="play" classes="d-flex align-items-center" />
-            </div>
+            {thumbnail && this.imgThumb(thumbnail)}
+            <Icon
+              icon="video"
+              classes={
+                thumbnail
+                  ? "d-block text-white position-absolute end-0 top-0 mini-overlay text-opacity-75 text-opacity-100-hover"
+                  : "d-flex align-items-center"
+              }
+            />
           </a>
         );
       } else {
@@ -694,19 +721,14 @@ export class PostListing extends Component<PostListingProps, PostListingState> {
   }
 
   mobileThumbnail() {
-    const post = this.postView.post;
-    return post.thumbnail_url || (post.url && isImage(post.url)) ? (
+    return (
       <div className="row">
-        <div className={`${this.state.imageExpanded ? "col-12" : "col-9"}`}>
-          {this.postTitleLine()}
-        </div>
+        <div className="col-9">{this.postTitleLine()}</div>
         <div className="col-3 mobile-thumbnail-container">
           {/* Post thumbnail */}
-          {!this.state.imageExpanded && this.thumbnail()}
+          {this.thumbnail()}
         </div>
       </div>
-    ) : (
-      this.postTitleLine()
     );
   }
 
@@ -805,9 +827,17 @@ export class PostListing extends Component<PostListingProps, PostListingState> {
   }
 
   // The actual editing is done in the receive for post
-  handleEditPost(form: EditPost) {
-    this.setState({ showEdit: false });
-    return this.props.onPostEdit(form);
+  async handleEditPost(form: EditPost) {
+    this.setState({ loading: true });
+    const res = await this.props.onPostEdit(form);
+
+    if (res.state === "success") {
+      toast(I18NextService.i18n.t("edited_post"));
+      this.setState({ loading: false, showEdit: false });
+    } else if (res.state === "failed") {
+      toast(I18NextService.i18n.t(res.err.message), "danger");
+      this.setState({ loading: false });
+    }
   }
 
   handleShare(i: PostListing) {
