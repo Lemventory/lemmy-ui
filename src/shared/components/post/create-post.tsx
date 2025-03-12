@@ -89,6 +89,7 @@ interface CreatePostState {
   siteRes: GetSiteResponse;
   loading: boolean;
   selectedCommunityChoice?: Choice;
+  selectedCommunityIsNsfw: boolean;
   initialCommunitiesRes: RequestState<ListCommunitiesResponse>;
   isIsomorphic: boolean;
   resetCounter: number; // resets PostForm when changed
@@ -115,6 +116,7 @@ export class CreatePost extends Component<
     initialCommunitiesRes: EMPTY_REQUEST,
     isIsomorphic: false,
     resetCounter: 0,
+    selectedCommunityIsNsfw: false,
   };
 
   constructor(props: CreatePostRouteProps, context: any) {
@@ -165,6 +167,7 @@ export class CreatePost extends Component<
       if (res.state === "success") {
         this.setState({
           selectedCommunityChoice: communityToChoice(res.data.community_view),
+          selectedCommunityIsNsfw: res.data.community_view.community.nsfw,
           loading: false,
         });
       }
@@ -203,6 +206,10 @@ export class CreatePost extends Component<
           title: locationState.name,
           url: locationState.url,
           body: locationState.body,
+          altText: locationState.altText,
+          nsfw: locationState.nsfw,
+          languageId: locationState.languageId,
+          customThumbnailUrl: locationState.customThumbnailUrl,
         });
         this.setState(s => ({ resetCounter: s.resetCounter + 1 }));
       }
@@ -225,7 +232,12 @@ export class CreatePost extends Component<
   }
 
   render() {
-    const { selectedCommunityChoice, siteRes, loading } = this.state;
+    const {
+      selectedCommunityChoice,
+      selectedCommunityIsNsfw,
+      siteRes,
+      loading,
+    } = this.state;
     const {
       body,
       communityId,
@@ -234,6 +246,7 @@ export class CreatePost extends Component<
       title,
       nsfw,
       url,
+      altText,
     } = this.props;
 
     const params: PostFormParams = {
@@ -244,6 +257,7 @@ export class CreatePost extends Component<
       custom_thumbnail: customThumbnailUrl,
       language_id: languageId,
       nsfw: nsfw === "true",
+      alt_text: altText,
     };
 
     return (
@@ -278,7 +292,9 @@ export class CreatePost extends Component<
               onUrlBlur={this.handleUrlBlur}
               onThumbnailUrlBlur={this.handleThumbnailUrlBlur}
               onNsfwChange={this.handleNsfwChange}
+              onAltTextBlur={this.handleAltTextBlur}
               onCopySuggestedTitle={this.handleCopySuggestedTitle}
+              isNsfwCommunity={selectedCommunityIsNsfw}
             />
           </div>
         </div>
